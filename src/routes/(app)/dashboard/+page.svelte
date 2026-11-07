@@ -120,8 +120,9 @@
 					<div class="space-y-2">
 						{#each data.recent as receipt, index (receipt.id)}
 							<a
-								href={`/shops/${receipt.shop.id}`}
+								href={`/receipts/${receipt.id}`}
 								class="group flex items-center gap-3 rounded-xl border border-transparent p-2.5 transition hover:border-surface-200 hover:bg-surface-200/35 dark:hover:border-surface-700 dark:hover:bg-surface-800/45"
+								title="Compare this basket at other supermarkets"
 							>
 								<div
 									class="grid h-11 w-11 shrink-0 place-items-center rounded-xl text-sm font-extrabold text-white shadow-sm"
