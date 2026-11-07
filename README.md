@@ -10,6 +10,7 @@ Built as a working prototype with **SvelteKit**, **PostgreSQL**, **Better Auth**
 
 - **Receipt scanning from photo / camera** — Indra OCR runs locally in the browser with ONNX Runtime Web. The photo never leaves the device.
 - **Discount-aware totals** — negative and named discount lines (Clubcard, multibuy, coupon, Nectar, price match) are separated from products and reconciled against the printed subtotal/total, so item sums, discounts and the amount paid stay consistent.
+- **Gemma 4 parsing** — after on-device Indra OCR, the extracted text is sent to a server-side Gemma 4 model through an OpenAI-compatible endpoint, which returns structured items, discounts, dates and totals. A deterministic parser is used automatically when no API key is configured or the model fails.
 - **Location and radius** — enter a UK postcode/town or use browser geolocation, then restrict the map and every price comparison to stores within 1–50 miles.
 - **Price database per store per region** — every line item upserts a current `item_prices` row for that shop/product, with seeded regional and chain price variation.
 - **OpenStreetMap store map** — real UK supermarket coordinates imported from OSM via Overpass. Click a store to see its prices; markers show the price of the searched item (or your most recent item) above the store.
@@ -78,9 +79,15 @@ DATABASE_URL=postgres://localhost:5432/receipto
 BETTER_AUTH_SECRET=replace-with-a-long-random-string
 BETTER_AUTH_URL=http://localhost:5173
 PUBLIC_INDRA_MODEL_BASE=
+
+GEMMA_API_KEY=replace-with-your-openrouter-api-key
+GEMMA_BASE_URL=https://openrouter.ai/api/v1
+GEMMA_MODEL=google/gemma-4-31b-it
 ```
 
 `PUBLIC_INDRA_MODEL_BASE` can stay empty: the browser streams the pinned Indra models from Hugging Face on first use and the browser caches them. Set it to a local URL/path if you host the model files yourself.
+
+`GEMMA_API_KEY` is the only key needed for Gemma parsing. Replace the placeholder with a real OpenRouter key, or point `GEMMA_BASE_URL` at another OpenAI-compatible server. While the placeholder is present, the app uses the local rules parser and shows **Local parser** in the scan review. Restart `npm run dev` after changing the key.
 
 ### 3. Migrate and seed
 
@@ -146,6 +153,8 @@ Receipt scanning uses Datalab's [Indra OCR](https://huggingface.co/datalab-to/in
 - The receipt parser is a pure TypeScript module (`src/lib/utils/receipt-parser.ts`) and also works with pasted text.
 - Discount lines are not products. The parser reconciles the item subtotal, discount candidates and the printed total; it handles both negative discount lines and positive “savings” lines that are already reflected in the total.
 - Store labels combine the OSM shop name with its locality, so the scanner review lists names such as “Lidl Withington” or “Lidl Didsbury” instead of several identical “Lidl” entries.
+- Gemma 4 is used server-side to turn OCR text into structured receipt JSON. The browser never sees the API key or the raw image. If the Gemma request fails, the deterministic parser is used and the review shows a warning.
+- `GEMMA_BASE_URL` can point at OpenRouter, Google's OpenAI-compatible endpoint, a vLLM server or Ollama (`http://localhost:11434/v1` with `GEMMA_MODEL=gemma4:31b`). `GEMMA_API_KEY` can be any non-placeholder token for servers that don't require one.
 - Only the extracted text goes to the server, where product matching / alias learning runs. The image itself never leaves the browser.
 - If the model download is blocked, the UI falls back to paste-text and sample modes.
 

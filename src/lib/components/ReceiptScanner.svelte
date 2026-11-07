@@ -104,6 +104,8 @@
 	});
 	let saveError = $state('');
 	let showRaw = $state(false);
+	let parserSource = $state<'gemma' | 'rules' | null>(null);
+	let parserModel = $state<string | null>(null);
 
 	let chainOptions = $derived(
 		[...new Set(stores.map((store) => store.supermarketName))].sort((a, b) => a.localeCompare(b))
@@ -139,7 +141,7 @@
 		total !== null && Math.abs(Number(total) - expectedTotal) > 0.02
 	);
 	let canSave = $derived(
-		busy !== 'saving' && shopId !== null && items.some((item) => item.name.trim() && item.price > 0)
+		busy === 'idle' && shopId !== null && items.some((item) => item.name.trim() && item.price > 0)
 	);
 
 	onDestroy(() => {
@@ -160,6 +162,8 @@
 		discounts = [];
 		warnings = [];
 		ocrText = '';
+		parserSource = null;
+		parserModel = null;
 	}
 
 	function handleInput(event: Event) {
@@ -184,6 +188,8 @@
 		parsed = null;
 		items = [];
 		discounts = [];
+		parserSource = null;
+		parserModel = null;
 	}
 
 	async function runOcr() {
@@ -209,31 +215,58 @@
 		}
 	}
 
-	async function parseAndMatch(text: string) {
-		const local = parseReceiptText(text);
-		parsed = local;
-		warnings = local.warnings.filter((warning) => !warning.startsWith('Items £'));
-		items = local.items.map((item) => ({
-			key: crypto.randomUUID(),
-			name: item.name,
-			price: item.price,
-			quantity: item.quantity,
-			productId: null,
-			matches: []
-		}));
-		discounts = local.discounts.map((discount) => ({
+	type ParseResponse = {
+		receipt: ParsedReceipt;
+		items: { name: string; price: number; quantity: number; matches: Match[] }[];
+		parser: 'gemma' | 'rules';
+		model: string | null;
+		aiError: string | null;
+	};
+
+	function applyReceipt(
+		receipt: ParsedReceipt,
+		matches: ParseResponse['items'],
+		source: 'gemma' | 'rules' | null,
+		model: string | null,
+		aiError: string | null
+	) {
+		parsed = receipt;
+		warnings = receipt.warnings.filter(
+			(warning) => !warning.startsWith('Items £') && !warning.startsWith('Gemma items £')
+		);
+		if (aiError) warnings = [...warnings, 'Gemma parsing was unavailable — used the local parser.'];
+
+		items = receipt.items.map((item, index) => {
+			const candidates = matches[index]?.matches ?? [];
+			const best = candidates[0];
+			return {
+				key: crypto.randomUUID(),
+				name: item.name,
+				price: item.price,
+				quantity: item.quantity,
+				productId: best && best.score >= 0.45 ? best.id : null,
+				matches: candidates
+			};
+		});
+		discounts = receipt.discounts.map((discount) => ({
 			key: crypto.randomUUID(),
 			name: discount.name,
 			amount: discount.amount
 		}));
-		total = local.total;
-		purchasedAt = local.purchasedAt.slice(0, 10);
+		total = receipt.total;
+		purchasedAt = receipt.purchasedAt.slice(0, 10);
+		parserSource = source;
+		parserModel = model;
 
+		const detectedChain =
+			receipt.supermarket && stores.some((store) => store.supermarketName === receipt.supermarket)
+				? receipt.supermarket
+				: null;
 		const recentStore = recentStores
 			.map((recent) => stores.find((store) => store.id === recent.shopId))
 			.find(Boolean);
 		chain =
-			local.supermarket ??
+			detectedChain ??
 			recentStore?.supermarketName ??
 			stores[0]?.supermarketName ??
 			'';
@@ -244,30 +277,25 @@
 			recentStore?.id ??
 			stores[0]?.id ??
 			null;
+	}
 
-		if (!items.length) return;
+	async function parseAndMatch(text: string) {
+		const local = parseReceiptText(text);
+		// Show the rules-based provisional result while Gemma works.
+		applyReceipt(local, [], null, null, null);
 
 		busy = 'matching';
 		try {
 			const response = await fetch('/api/receipts/parse', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ items: local.items, supermarket: local.supermarket })
+				body: JSON.stringify({ text, supermarket: local.supermarket })
 			});
-			if (!response.ok) throw new Error('Match request failed');
-			const data = (await response.json()) as {
-				items: { name: string; price: number; quantity: number; matches: Match[] }[];
-			};
-			items = items.map((item, index) => {
-				const match = data.items[index];
-				const best = match?.matches?.[0];
-				return {
-					...item,
-					matches: match?.matches ?? [],
-					productId: best && best.score >= 0.45 ? best.id : null
-				};
-			});
+			if (!response.ok) throw new Error('Parse request failed');
+			const data = (await response.json()) as ParseResponse;
+			applyReceipt(data.receipt, data.items, data.parser, data.model, data.aiError);
 		} catch {
+			parserSource = 'rules';
 			warnings = [...warnings, 'Product matching is unavailable — items will be saved as new products.'];
 		} finally {
 			busy = 'idle';
@@ -493,6 +521,10 @@
 				</div>
 			{/if}
 
+			<p class="mt-3 text-[10px] opacity-45">
+				The image stays in this browser. Extracted text is sent for Gemma 4 parsing and product matching.
+			</p>
+
 
 		</section>
 
@@ -521,7 +553,20 @@
 			<section class="surface-card rounded-2xl p-4 sm:p-5">
 				<div class="mb-4 flex items-start justify-between gap-3">
 					<h2 class="text-lg font-extrabold tracking-tight">2. Review</h2>
-					<span class="badge preset-tonal-primary">{items.length} items</span>
+					<div class="flex flex-wrap items-center justify-end gap-1.5">
+						{#if parserSource === 'gemma'}
+							<span class="badge preset-tonal-secondary gap-1 text-[9px]" title={parserModel ?? 'Gemma 4'}>
+								<Sparkles size={10} /> Gemma 4
+							</span>
+						{:else if parserSource === 'rules'}
+							<span class="badge preset-tonal-surface gap-1 text-[9px]" title="Gemma key not configured or Gemma parsing unavailable">Local parser</span>
+						{:else if busy === 'matching'}
+							<span class="badge preset-tonal-surface gap-1 text-[9px]">
+								<LoaderCircle size={10} class="animate-spin" /> Parsing…
+							</span>
+						{/if}
+						<span class="badge preset-tonal-primary">{items.length} items</span>
+					</div>
 				</div>
 
 				{#if warnings.length}

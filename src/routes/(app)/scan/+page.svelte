@@ -14,7 +14,7 @@
 	<header class="rise-in">
 		<div class="flex flex-wrap items-center gap-2">
 			<p class="text-xs font-bold uppercase tracking-[0.18em] text-primary-700 dark:text-primary-300">Receipt scanner</p>
-			<span class="badge preset-tonal-primary gap-1 text-[10px]"><ShieldCheck size={12} /> Private by default</span>
+			<span class="badge preset-tonal-primary gap-1 text-[10px]"><ShieldCheck size={12} /> On-device OCR</span>
 		</div>
 		<h1 class="mt-1 text-3xl font-extrabold tracking-tight sm:text-4xl">Scan a receipt</h1>
 	</header>

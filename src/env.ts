@@ -17,5 +17,17 @@ export const variables = defineEnvVars({
 	},
 	OVERPASS_URL: {
 		description: 'Overpass API endpoint used by the OSM shop import script'
+	},
+	GEMMA_API_KEY: {
+		description: 'API key for the OpenAI-compatible Gemma 4 endpoint',
+		schema: (value) => value ?? ''
+	},
+	GEMMA_BASE_URL: {
+		description: 'Base URL for the OpenAI-compatible Gemma 4 endpoint',
+		schema: (value) => value ?? 'https://openrouter.ai/api/v1'
+	},
+	GEMMA_MODEL: {
+		description: 'Gemma 4 model ID, e.g. google/gemma-4-31b-it',
+		schema: (value) => value ?? 'google/gemma-4-31b-it'
 	}
 });
