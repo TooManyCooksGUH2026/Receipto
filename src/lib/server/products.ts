@@ -254,6 +254,180 @@ export async function getPriceStats(productIds: number[], shopIds?: number[] | n
 	return map;
 }
 
+export type ProductSearchOption =
+	| {
+			kind: 'product';
+			key: string;
+			id: number;
+			itemName: string;
+			brand: string | null;
+			size: string | null;
+			supermarket: string | null;
+			className: string;
+			category: string;
+			icon: string | null;
+			stats: PriceStats | null;
+	  }
+	| {
+			kind: 'class';
+			key: string;
+			classId: number;
+			itemName: string;
+			className: string;
+			category: string;
+			icon: string | null;
+			size: string | null;
+			supermarkets: string[];
+			variantCount: number;
+			stats: PriceStats | null;
+	  };
+
+/**
+ * Search options for the global search box. Own-brand products are grouped by
+ * product class; branded products stay individual.
+ */
+export async function searchProductOptions(
+	query: string,
+	limit = 7,
+	shopIds?: number[] | null
+): Promise<ProductSearchOption[]> {
+	const q = query.trim();
+	const base = db
+		.select({
+			id: products.id,
+			itemName: products.itemName,
+			brand: products.brand,
+			size: products.size,
+			supermarket: products.supermarket,
+			isOwnBrand: products.isOwnBrand,
+			classId: products.classId,
+			className: productClasses.name,
+			category: productClasses.category,
+			icon: productClasses.icon
+		})
+		.from(products)
+		.innerJoin(productClasses, eq(products.classId, productClasses.id));
+
+	const rows = q
+		? await base
+				.where(
+					or(
+						ilike(products.itemName, `%${q}%`),
+						ilike(productClasses.name, `%${q}%`),
+						ilike(productClasses.category, `%${q}%`),
+						ilike(products.brand, `%${q}%`)
+					)
+				)
+				.limit(200)
+		: await base.limit(200);
+
+	const stats = await getPriceStats(
+		rows.map((row) => row.id),
+		shopIds
+	);
+
+	type Group = {
+		classId: number;
+		className: string;
+		category: string;
+		icon: string | null;
+		size: string | null;
+		variants: {
+			supermarket: string | null;
+			stats: PriceStats | null;
+		}[];
+	};
+
+	const groups = new Map<number, Group>();
+	const branded: ProductSearchOption[] = [];
+
+	for (const row of rows) {
+		const rowStats = stats.get(row.id) ?? null;
+		if (row.isOwnBrand) {
+			const group = groups.get(row.classId) ?? {
+				classId: row.classId,
+				className: row.className,
+				category: row.category,
+				icon: row.icon,
+				size: row.size,
+				variants: []
+			};
+			if (!group.size) group.size = row.size;
+			group.variants.push({ supermarket: row.supermarket, stats: rowStats });
+			groups.set(row.classId, group);
+		} else {
+			branded.push({
+				kind: 'product',
+				key: `product-${row.id}`,
+				id: row.id,
+				itemName: row.itemName,
+				brand: row.brand,
+				size: row.size,
+				supermarket: row.supermarket,
+				className: row.className,
+				category: row.category,
+				icon: row.icon,
+				stats: rowStats
+			});
+		}
+	}
+
+	const grouped: ProductSearchOption[] = [...groups.values()].map((group) => {
+		const pricedVariants = group.variants.filter(
+			(variant) => variant.stats && variant.stats.minPrice !== null
+		);
+		const cheapest = pricedVariants.sort(
+			(a, b) => (a.stats?.minPrice ?? Infinity) - (b.stats?.minPrice ?? Infinity)
+		)[0];
+		const prices = pricedVariants
+			.map((variant) => variant.stats?.minPrice)
+			.filter((price): price is number => typeof price === 'number');
+		const storeCount = group.variants.reduce(
+			(sum, variant) => sum + (variant.stats?.storeCount ?? 0),
+			0
+		);
+		const aggregateStats: PriceStats | null = prices.length
+			? {
+					minPrice: Math.min(...prices),
+					maxPrice: Math.max(...prices),
+					avgPrice: prices.reduce((sum, price) => sum + price, 0) / prices.length,
+					storeCount,
+					cheapestShopId: cheapest?.stats?.cheapestShopId ?? null,
+					cheapestShopName: cheapest?.stats?.cheapestShopName ?? null,
+					cheapestSupermarket: cheapest?.stats?.cheapestSupermarket ?? null
+				}
+			: null;
+
+		return {
+			kind: 'class',
+			key: `class-${group.classId}`,
+			classId: group.classId,
+			itemName: `Own brand ${group.className}`,
+			className: group.className,
+			category: group.category,
+			icon: group.icon,
+			size: group.size,
+			supermarkets: [
+				...new Set(
+					group.variants
+						.map((variant) => variant.supermarket)
+						.filter((supermarket): supermarket is string => Boolean(supermarket))
+				)
+			],
+			variantCount: group.variants.length,
+			stats: aggregateStats
+		};
+	});
+
+	const sortByPrice = (a: ProductSearchOption, b: ProductSearchOption) =>
+		(a.stats?.minPrice ?? Infinity) - (b.stats?.minPrice ?? Infinity);
+
+	grouped.sort(sortByPrice);
+	branded.sort(sortByPrice);
+
+	return [...grouped, ...branded].slice(0, limit);
+}
+
 export async function searchProducts(query: string, limit = 20, shopIds?: number[] | null) {
 	const q = query.trim();
 	const base = db

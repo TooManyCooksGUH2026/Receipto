@@ -3,16 +3,38 @@
 	import { formatCurrency } from '#lib/utils/format';
 	import { LoaderCircle, Package, Search } from 'lucide-svelte';
 
-	type SearchResult = {
-		id: number;
-		itemName: string;
-		brand: string | null;
-		size: string | null;
-		className: string;
-		category: string;
-		icon: string | null;
-		stats: { minPrice: number | null; storeCount: number; cheapestSupermarket: string | null } | null;
+	type Stats = {
+		minPrice: number | null;
+		storeCount: number;
+		cheapestSupermarket: string | null;
 	};
+
+	type SearchResult =
+		| {
+				kind: 'product';
+				key: string;
+				id: number;
+				itemName: string;
+				brand: string | null;
+				size: string | null;
+				className: string;
+				category: string;
+				icon: string | null;
+				stats: Stats | null;
+		  }
+		| {
+				kind: 'class';
+				key: string;
+				classId: number;
+				itemName: string;
+				className: string;
+				category: string;
+				icon: string | null;
+				size: string | null;
+				supermarkets: string[];
+				variantCount: number;
+				stats: Stats | null;
+		  };
 
 	let {
 		onSelect,
@@ -72,7 +94,11 @@
 	function choose(product: SearchResult) {
 		open = false;
 		query = '';
-		if (onSelect) onSelect(product);
+		if (onSelect) {
+			onSelect(product);
+			return;
+		}
+		if (product.kind === 'class') goto(`/products/classes/${product.classId}`);
 		else goto(`/products/${product.id}`);
 	}
 
@@ -106,7 +132,7 @@
 			{#if error}
 				<p class="p-3 text-sm text-error-700 dark:text-error-300">{error}</p>
 			{:else}
-				{#each results as product (product.id)}
+				{#each results as product (product.key)}
 					<button
 						type="button"
 						class="flex w-full items-center gap-3 border-b border-surface-200/60 px-3 py-2.5 text-left last:border-0 hover:bg-primary-500/10 dark:border-surface-700/60"
@@ -118,7 +144,11 @@
 						<span class="min-w-0 flex-1">
 							<span class="block truncate text-sm font-semibold">{product.itemName}</span>
 							<span class="block truncate text-xs opacity-55">
-								{product.className}{product.size ? ` · ${product.size}` : ''}
+								{#if product.kind === 'class'}
+									{product.variantCount} own brands{product.size ? ` · ${product.size}` : ''}
+								{:else}
+									{product.className}{product.size ? ` · ${product.size}` : ''}
+								{/if}
 							</span>
 						</span>
 						<span class="shrink-0 text-right">

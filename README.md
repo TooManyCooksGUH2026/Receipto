@@ -16,7 +16,7 @@ Built as a working prototype with **SvelteKit**, **PostgreSQL**, **Better Auth**
 - **Accounts and sessions** — Better Auth email/password auth with Drizzle-backed sessions.
 - **Dashboard** — your latest shops, basket comparison against the previous shop, 30-day spend, item count, price charts and recent purchases.
 - **Basket comparison** — click any recent shop to see the same basket priced at the nearest store of every other chain, using own-brand equivalents for own-brand items and the same product for branded items.
-- **Product search** — a sidebar search plus a search card on the dashboard; the catalogue is grouped by product class.
+- **Product search** — the global search groups all own-brand milks/breads/etc. under one class result per product type; branded products stay individual. Clicking an own-brand result opens every supermarket's variant.
 - **Product-class equivalence** — the White Bread category groups own-brand equivalents from Tesco, Sainsbury's, Aldi, Co-op and others, while branded products stay separate. Warburtons at Sainsbury's and Warburtons at Tesco remain one product.
 - **Product matching** — the `ReceiptItem -> Product` mapping is learned in `receipt_to_product` (the prototype's `ReceiptToProduct`) and reused on future scans.
 - **Sidebar** — product search, items from your last shops, and your commonly bought items.

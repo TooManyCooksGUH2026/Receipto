@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import LocationPicker from '#lib/components/LocationPicker.svelte';
 	import ProductSearch from '#lib/components/ProductSearch.svelte';
 	import StoreMap, { type MapStore } from '#lib/components/StoreMap.svelte';
@@ -98,7 +99,10 @@
 			<div class="mx-auto max-w-3xl rounded-xl border border-surface-200/70 bg-surface-50 p-2 shadow-sm dark:border-surface-700 dark:bg-surface-900">
 				<ProductSearch
 					placeholder="Search an item to compare prices"
-					onSelect={(product) => selectProduct(product.id)}
+					onSelect={(product) => {
+						if (product.kind === 'class') goto(`/products/classes/${product.classId}`);
+						else selectProduct(product.id);
+					}}
 					compact
 				/>
 				<div class="mt-1.5 flex flex-wrap items-center gap-2 px-1 text-[10px]">
