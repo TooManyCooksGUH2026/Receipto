@@ -1,0 +1,21 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: receipto-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: receipto
+      POSTGRES_PASSWORD: receipto
+      POSTGRES_DB: receipto
+    ports:
+      - '5432:5432'
+    volumes:
+      - receipto-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U receipto -d receipto']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  receipto-pgdata:

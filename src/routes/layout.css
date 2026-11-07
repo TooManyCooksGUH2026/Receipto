@@ -1,0 +1,222 @@
+@import 'tailwindcss';
+
+@import '@skeletonlabs/skeleton';
+@import '@skeletonlabs/skeleton-svelte';
+@import '@fontsource-variable/montserrat';
+
+/* The theme provided with the project. */
+@import '../../theme.css';
+
+/* Skeleton uses the data-attribute dark mode strategy. */
+@custom-variant dark (&:where([data-mode='dark'], [data-mode='dark'] *));
+
+:root {
+	--receipto-shell: color-mix(in oklab, var(--color-surface-50) 88%, var(--color-primary-50));
+	--receipto-card: color-mix(in oklab, var(--color-surface-50) 94%, var(--color-primary-100));
+	--field-placeholder: color-mix(in oklab, var(--color-surface-500) 52%, transparent);
+}
+
+[data-mode='dark'] {
+	--receipto-shell: color-mix(in oklab, var(--color-surface-950) 92%, var(--color-primary-950));
+	--receipto-card: color-mix(in oklab, var(--color-surface-900) 94%, var(--color-primary-950));
+	--field-placeholder: color-mix(in oklab, var(--color-surface-400) 55%, transparent);
+}
+
+input::placeholder,
+textarea::placeholder {
+	opacity: 1;
+}
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+	-webkit-appearance: none;
+	margin: 0;
+}
+
+input[type='number'] {
+	appearance: textfield;
+	-moz-appearance: textfield;
+}
+
+html {
+	scroll-behavior: smooth;
+}
+
+body {
+	min-height: 100dvh;
+	background-image:
+		radial-gradient(
+			at 8% 0%,
+			color-mix(in oklab, var(--color-primary-400) 16%, transparent) 0px,
+			transparent 34%
+		),
+		radial-gradient(
+			at 96% 4%,
+			color-mix(in oklab, var(--color-secondary-400) 13%, transparent) 0px,
+			transparent 32%
+		),
+		radial-gradient(
+			at 65% 100%,
+			color-mix(in oklab, var(--color-tertiary-400) 9%, transparent) 0px,
+			transparent 38%
+		);
+	background-attachment: fixed;
+}
+
+::selection {
+	background: color-mix(in oklab, var(--color-primary-500) 55%, transparent);
+}
+
+@layer components {
+	.surface-card {
+		background-color: var(--receipto-card);
+		border: 1px solid color-mix(in oklab, var(--color-surface-300) 65%, transparent);
+		box-shadow: 0 18px 50px -30px color-mix(in oklab, var(--color-surface-950) 45%, transparent);
+	}
+
+	[data-mode='dark'] .surface-card {
+		border-color: color-mix(in oklab, var(--color-surface-700) 75%, transparent);
+	}
+
+	.glass-nav {
+		background: color-mix(in oklab, var(--receipto-shell) 82%, transparent);
+		backdrop-filter: blur(18px) saturate(130%);
+	}
+
+	.muted {
+		color: color-mix(in oklab, currentColor 58%, transparent);
+	}
+
+	.price-chip {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.25rem;
+		border-radius: 999px;
+		padding: 0.15rem 0.55rem;
+		font-size: 0.75rem;
+		font-weight: 700;
+		font-variant-numeric: tabular-nums;
+		background: color-mix(in oklab, var(--color-primary-500) 18%, transparent);
+		color: color-mix(in oklab, var(--color-primary-900) 90%, black);
+	}
+
+	[data-mode='dark'] .price-chip {
+		background: color-mix(in oklab, var(--color-primary-500) 20%, transparent);
+		color: var(--color-primary-200);
+	}
+
+	.scrollbar-thin {
+		scrollbar-width: thin;
+	}
+}
+
+/* Leaflet ------------------------------------------------------------ */
+.leaflet-container {
+	background: var(--color-surface-200);
+	font-family: var(--typo-base--font-family);
+	z-index: 0;
+}
+
+[data-mode='dark'] .leaflet-container {
+	background: var(--color-surface-800);
+}
+
+.leaflet-control-attribution {
+	font-size: 9px !important;
+	opacity: 0.75;
+}
+
+.store-price-marker {
+	background: transparent;
+	border: none;
+}
+
+.store-price-pin {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	transform: translateY(-4px);
+	filter: drop-shadow(0 6px 8px rgb(0 0 0 / 0.22));
+}
+
+.store-price-pin .pin-label {
+	white-space: nowrap;
+	border-radius: 999px;
+	padding: 0.25rem 0.55rem;
+	font-size: 11px;
+	font-weight: 800;
+	font-variant-numeric: tabular-nums;
+	background: var(--color-surface-50);
+	color: var(--color-surface-950);
+	border: 2px solid var(--color-primary-600);
+}
+
+.store-price-pin .pin-label.is-cheapest {
+	background: var(--color-primary-500);
+	color: var(--color-primary-950);
+	border-color: var(--color-primary-700);
+}
+
+.store-price-pin .pin-label.is-expensive {
+	background: var(--color-surface-50);
+	color: var(--color-error-800);
+	border-color: var(--color-error-500);
+}
+
+[data-mode='dark'] .store-price-pin .pin-label {
+	background: var(--color-surface-900);
+	color: var(--color-surface-50);
+	border-color: var(--color-primary-400);
+}
+
+[data-mode='dark'] .store-price-pin .pin-label.is-cheapest {
+	background: var(--color-primary-500);
+	color: var(--color-primary-950);
+}
+
+[data-mode='dark'] .store-price-pin .pin-label.is-expensive {
+	color: var(--color-error-300);
+	border-color: var(--color-error-400);
+}
+
+.store-price-pin .pin-tail {
+	width: 2px;
+	height: 12px;
+	background: var(--color-primary-600);
+}
+
+.store-price-pin .pin-dot {
+	width: 8px;
+	height: 8px;
+	border-radius: 999px;
+	background: var(--color-primary-600);
+	border: 2px solid var(--color-surface-50);
+	margin-top: -2px;
+}
+
+[data-mode='dark'] .store-price-pin .pin-tail,
+[data-mode='dark'] .store-price-pin .pin-dot {
+	background: var(--color-primary-400);
+	border-color: var(--color-surface-900);
+}
+
+.store-price-pin.is-active .pin-label {
+	outline: 3px solid color-mix(in oklab, var(--color-secondary-500) 55%, transparent);
+}
+
+/* Small entrance animation for page content */
+@keyframes rise-in {
+	from {
+		opacity: 0;
+		transform: translateY(10px);
+	}
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
+.rise-in {
+	animation: rise-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
