@@ -1,8 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { readReceiptImage, type ReceiptOcrProgress } from '#lib/ocr/indra';
-	import { parseReceiptText, SAMPLE_RECEIPT, type ParsedReceipt } from '#lib/utils/receipt-parser';
+	import { SAMPLE_RECEIPT } from '#lib/data/sample-receipt';
+	import type { ParsedReceipt } from '#lib/utils/receipt-types';
 	import { formatCurrency } from '#lib/utils/format';
+	import {
+		IMAGE_MAX_BYTES,
+		prepareReceiptImage,
+		type PreparedImage
+	} from '#lib/utils/image';
 	import { shopDisplayName } from '#lib/utils/shop-name';
 	import {
 		Calendar,
@@ -83,7 +89,10 @@
 	let ocrText = $state('');
 	let ocrMarkdown = $state('');
 	let ocrError = $state('');
+	let parseError = $state('');
 	let pastedText = $state('');
+	let preparedImage = $state<PreparedImage | null>(null);
+	let compressionInfo = $state('');
 	let parsed = $state<ParsedReceipt | null>(null);
 	let items = $state<EditableItem[]>([]);
 	let discounts = $state<EditableDiscount[]>([]);
@@ -104,7 +113,7 @@
 	});
 	let saveError = $state('');
 	let showRaw = $state(false);
-	let parserSource = $state<'gemma' | 'rules' | null>(null);
+	let parserSource = $state<'gemma' | null>(null);
 	let parserModel = $state<string | null>(null);
 
 	let chainOptions = $derived(
@@ -148,6 +157,16 @@
 		if (previewUrl) URL.revokeObjectURL(previewUrl);
 	});
 
+	function clearParse() {
+		parsed = null;
+		items = [];
+		discounts = [];
+		warnings = [];
+		parseError = '';
+		parserSource = null;
+		parserModel = null;
+	}
+
 	function setFile(next: File) {
 		if (!next.type.startsWith('image/')) {
 			ocrError = 'Choose an image of a paper receipt (JPG, PNG or HEIC).';
@@ -157,13 +176,11 @@
 		file = next;
 		previewUrl = URL.createObjectURL(next);
 		ocrError = '';
-		parsed = null;
-		items = [];
-		discounts = [];
-		warnings = [];
 		ocrText = '';
-		parserSource = null;
-		parserModel = null;
+		ocrMarkdown = '';
+		preparedImage = null;
+		compressionInfo = '';
+		clearParse();
 	}
 
 	function handleInput(event: Event) {
@@ -185,32 +202,48 @@
 		file = null;
 		previewUrl = '';
 		ocrError = '';
-		parsed = null;
-		items = [];
-		discounts = [];
-		parserSource = null;
-		parserModel = null;
+		ocrText = '';
+		ocrMarkdown = '';
+		preparedImage = null;
+		compressionInfo = '';
+		clearParse();
 	}
 
 	async function runOcr() {
 		if (!file || busy !== 'idle') return;
 		busy = 'ocr';
 		ocrError = '';
-		progress = { stage: 'loading', percent: 2, message: 'Starting on-device OCR…' };
+		clearParse();
+		progress = { stage: 'loading', percent: 1, message: 'Compressing image…' };
+
 		try {
-			const result = await readReceiptImage(file, (next) => (progress = next));
-			ocrText = result.text;
-			ocrMarkdown = result.markdown;
-			if (!result.text.trim()) {
-				ocrError = 'The OCR model could not find readable text. Try a flatter, brighter photo, or paste the receipt text.';
-				return;
+			const prepared = await prepareReceiptImage(file);
+			preparedImage = prepared;
+			compressionInfo = prepared.compressed
+				? `Compressed ${(prepared.originalBytes / 1_000_000).toFixed(1)} MB → ${(prepared.bytes / 1_000_000).toFixed(1)} MB (${prepared.width}×${prepared.height}).`
+				: `Image is within the ${(IMAGE_MAX_BYTES / 1_000_000).toFixed(1)} MB limit.`;
+
+			progress = { stage: 'loading', percent: 4, message: 'Starting on-device OCR…' };
+			let text = '';
+			try {
+				const result = await readReceiptImage(prepared.file, (next) => (progress = next));
+				text = result.text;
+				ocrText = result.text;
+				ocrMarkdown = result.markdown;
+				if (!text.trim()) {
+					ocrError = 'OCR found no readable text; Gemma 4 will read the image directly.';
+				}
+			} catch (error) {
+				console.error(error);
+				ocrError = 'Indra OCR could not start; Gemma 4 will read the image directly.';
 			}
-			await parseAndMatch(result.text);
+
+			// Gemma 4 is the only parser: send the OCR text and compressed image
+			// straight to the server. There is no local fallback.
+			await parseWithGemma(text, prepared.dataUrl);
 		} catch (error) {
 			console.error(error);
-			ocrError =
-				'Indra OCR could not start. This usually means the first model download was blocked — check your connection, or use the paste-text option.';
-		} finally {
+			ocrError = 'Could not prepare this image. Try a JPG or PNG photo.';
 			busy = 'idle';
 		}
 	}
@@ -218,24 +251,14 @@
 	type ParseResponse = {
 		receipt: ParsedReceipt;
 		items: { name: string; price: number; quantity: number; matches: Match[] }[];
-		parser: 'gemma' | 'rules';
 		model: string | null;
-		aiError: string | null;
 	};
 
-	function applyReceipt(
-		receipt: ParsedReceipt,
-		matches: ParseResponse['items'],
-		source: 'gemma' | 'rules' | null,
-		model: string | null,
-		aiError: string | null
-	) {
+	function applyReceipt(receipt: ParsedReceipt, matches: ParseResponse['items'], model: string | null) {
 		parsed = receipt;
 		warnings = receipt.warnings.filter(
 			(warning) => !warning.startsWith('Items £') && !warning.startsWith('Gemma items £')
 		);
-		if (aiError) warnings = [...warnings, 'Gemma parsing was unavailable — used the local parser.'];
-
 		items = receipt.items.map((item, index) => {
 			const candidates = matches[index]?.matches ?? [];
 			const best = candidates[0];
@@ -255,7 +278,7 @@
 		}));
 		total = receipt.total;
 		purchasedAt = receipt.purchasedAt.slice(0, 10);
-		parserSource = source;
+		parserSource = 'gemma';
 		parserModel = model;
 
 		const detectedChain =
@@ -279,40 +302,63 @@
 			null;
 	}
 
-	async function parseAndMatch(text: string) {
-		const local = parseReceiptText(text);
-		// Show the rules-based provisional result while Gemma works.
-		applyReceipt(local, [], null, null, null);
-
+	async function parseWithGemma(text: string, imageDataUrl: string | null) {
+		parseError = '';
+		parsed = null;
+		items = [];
+		discounts = [];
+		warnings = [];
+		parserSource = null;
+		parserModel = null;
 		busy = 'matching';
+
 		try {
 			const response = await fetch('/api/receipts/parse', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ text, supermarket: local.supermarket })
+				body: JSON.stringify({ text, image: imageDataUrl })
 			});
-			if (!response.ok) throw new Error('Parse request failed');
-			const data = (await response.json()) as ParseResponse;
-			applyReceipt(data.receipt, data.items, data.parser, data.model, data.aiError);
-		} catch {
-			parserSource = 'rules';
-			warnings = [...warnings, 'Product matching is unavailable — items will be saved as new products.'];
+			const data = (await response.json().catch(() => null)) as
+				| (ParseResponse & { error?: string })
+				| null;
+			if (!response.ok) {
+				throw new Error(data?.error ?? 'Gemma 4 parsing failed');
+			}
+			if (!data) throw new Error('Gemma 4 returned an empty response');
+			applyReceipt(data.receipt, data.items, data.model);
+		} catch (error) {
+			console.error(error);
+			parseError = error instanceof Error ? error.message : 'Gemma 4 parsing failed';
 		} finally {
 			busy = 'idle';
 		}
 	}
 
+	async function retryParse() {
+		if (busy !== 'idle') return;
+		const text = ocrText || pastedText;
+		const image = preparedImage?.dataUrl ?? null;
+		if (!text && !image) return;
+		await parseWithGemma(text, image);
+	}
+
 	async function useSample() {
 		pastedText = SAMPLE_RECEIPT;
 		ocrText = SAMPLE_RECEIPT;
+		ocrMarkdown = '';
+		preparedImage = null;
+		compressionInfo = '';
 		mode = 'paste';
-		await parseAndMatch(SAMPLE_RECEIPT);
+		await parseWithGemma(SAMPLE_RECEIPT, null);
 	}
 
 	async function parsePasted() {
 		if (!pastedText.trim() || busy !== 'idle') return;
 		ocrText = pastedText;
-		await parseAndMatch(pastedText);
+		ocrMarkdown = '';
+		preparedImage = null;
+		compressionInfo = '';
+		await parseWithGemma(pastedText, null);
 	}
 
 	async function refreshMatches(item: EditableItem) {
@@ -509,7 +555,7 @@
 						></div>
 					</div>
 					<p class="mt-2 text-[10px] opacity-50">
-						First run downloads ~40 MB of Indra OCR models. Your photo never leaves this device.
+						First run downloads ~40 MB of Indra OCR models. The image is compressed on-device; OCR runs locally, then the compressed image and OCR text go to Gemma 4.
 					</p>
 				</div>
 			{/if}
@@ -521,8 +567,12 @@
 				</div>
 			{/if}
 
+			{#if compressionInfo}
+				<p class="mt-2 text-[10px] opacity-45">{compressionInfo}</p>
+			{/if}
+
 			<p class="mt-3 text-[10px] opacity-45">
-				The image stays in this browser. Extracted text is sent for Gemma 4 parsing and product matching.
+				Images over {(IMAGE_MAX_BYTES / 1_000_000).toFixed(1)} MB or 2000px are resized on-device. The compressed image and OCR text are sent to Gemma 4 for parsing; product matching runs on the server.
 			</p>
 
 
@@ -557,12 +607,6 @@
 						{#if parserSource === 'gemma'}
 							<span class="badge preset-tonal-secondary gap-1 text-[9px]" title={parserModel ?? 'Gemma 4'}>
 								<Sparkles size={10} /> Gemma 4
-							</span>
-						{:else if parserSource === 'rules'}
-							<span class="badge preset-tonal-surface gap-1 text-[9px]" title="Gemma key not configured or Gemma parsing unavailable">Local parser</span>
-						{:else if busy === 'matching'}
-							<span class="badge preset-tonal-surface gap-1 text-[9px]">
-								<LoaderCircle size={10} class="animate-spin" /> Parsing…
 							</span>
 						{/if}
 						<span class="badge preset-tonal-primary">{items.length} items</span>
@@ -775,6 +819,27 @@
 					{/if}
 				</button>
 
+			</section>
+		{:else if busy === 'matching'}
+			<section class="surface-card rounded-2xl p-8 text-center">
+				<div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-primary-500/15 text-primary-800 dark:text-primary-200">
+					<LoaderCircle size={26} class="animate-spin" />
+				</div>
+				<h2 class="mt-4 text-xl font-extrabold tracking-tight">Gemma 4 is parsing</h2>
+				<p class="mt-2 text-sm opacity-55">
+					Using the OCR text and the compressed receipt image. No local parser is used.
+				</p>
+			</section>
+		{:else if parseError}
+			<section class="surface-card rounded-2xl p-8 text-center">
+				<div class="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-error-500/12 text-error-800 dark:text-error-200">
+					<CircleAlert size={26} />
+				</div>
+				<h2 class="mt-4 text-xl font-extrabold tracking-tight">Gemma 4 parsing failed</h2>
+				<p class="mx-auto mt-2 max-w-sm text-sm opacity-60">{parseError}</p>
+				<button type="button" class="btn preset-filled-primary-500 mt-5 gap-2" onclick={retryParse}>
+					<RotateCcw size={16} /> Try again
+				</button>
 			</section>
 		{:else}
 			<section class="surface-card rounded-2xl p-8 text-center">

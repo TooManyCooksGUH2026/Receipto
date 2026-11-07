@@ -1,5 +1,5 @@
 import { GEMMA_API_KEY, GEMMA_BASE_URL, GEMMA_MODEL } from '$app/env/private';
-import { parseReceiptText, type ParsedDiscount, type ParsedItem, type ParsedReceipt } from '#lib/utils/receipt-parser';
+import type { ParsedDiscount, ParsedItem, ParsedReceipt } from '#lib/utils/receipt-types';
 import { ALL_SUPERMARKETS, type Supermarket } from '#lib/data/catalog';
 
 const DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
@@ -132,7 +132,9 @@ function readMessageContent(message: unknown): string {
 	return '';
 }
 
-const SYSTEM_PROMPT = `You are a high-accuracy UK supermarket receipt parser. Convert raw OCR text into valid JSON only, no markdown, no explanation.
+const SYSTEM_PROMPT = `You are a high-accuracy UK supermarket receipt parser. Convert the receipt (OCR text and, when attached, the receipt image) into valid JSON only, no markdown, no explanation.
+
+When an image is attached, treat the image as authoritative and use the OCR text as a cross-check. When they disagree, trust the image.
 
 Return exactly this JSON shape:
 {
@@ -158,11 +160,21 @@ Rules:
 - Do not include discounts in item prices.
 - Return JSON only.`;
 
-export async function parseReceiptWithGemma(ocrText: string): Promise<ParsedReceipt | null> {
+export async function parseReceiptWithGemma(
+	ocrText: string,
+	imageDataUrl?: string | null
+): Promise<ParsedReceipt | null> {
 	const key = configuredKey();
 	if (!key) return null;
+	if (!ocrText.trim() && !imageDataUrl) throw new Error('No receipt text or image supplied');
 
-	const fallback = parseReceiptText(ocrText);
+	const userText = `OCR TEXT:\n${ocrText.trim() || '(no OCR text available)'}\n\nUse the receipt image as the authority where the OCR text is ambiguous. Return only JSON.`;
+	const userContent = imageDataUrl
+		? [
+				{ type: 'text', text: userText },
+				{ type: 'image_url', image_url: { url: imageDataUrl } }
+			]
+		: userText;
 
 	const response = await fetch(endpoint(), {
 		method: 'POST',
@@ -176,7 +188,7 @@ export async function parseReceiptWithGemma(ocrText: string): Promise<ParsedRece
 			model: gemmaModel(),
 			messages: [
 				{ role: 'system', content: SYSTEM_PROMPT },
-				{ role: 'user', content: `OCR TEXT:\n${ocrText}` }
+				{ role: 'user', content: userContent }
 			],
 			temperature: 0,
 			max_tokens: 3000
@@ -277,15 +289,19 @@ export async function parseReceiptWithGemma(ocrText: string): Promise<ParsedRece
 			`Gemma items £${itemSubtotal.toFixed(2)} − discounts £${discountTotal.toFixed(2)} = £${expectedTotal.toFixed(2)}, but the printed total is £${payloadTotal.toFixed(2)}.`
 		);
 	}
-	if (!fallback.supermarket && !normaliseSupermarket(payload.supermarket)) {
+	const supermarket = normaliseSupermarket(
+		payload.supermarket ?? payload.store ?? payload.retailer
+	);
+	if (!supermarket) {
 		warnings.push('Supermarket not recognised — choose the store manually.');
 	}
 
 	return {
-		supermarket:
-			normaliseSupermarket(payload.supermarket ?? payload.store ?? payload.retailer) ??
-			fallback.supermarket,
-		purchasedAt: normaliseDate(payload.purchasedAt ?? payload.date, fallback.purchasedAt),
+		supermarket,
+		purchasedAt: normaliseDate(
+			payload.purchasedAt ?? payload.date,
+			new Date().toISOString()
+		),
 		subtotal,
 		discountTotal,
 		discounts,
